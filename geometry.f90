@@ -8,6 +8,7 @@ module geometry
     public :: deg2rad, rad2deg
     public :: r12, sumSquares, norm, normalized 
     public :: dotProduct, crossProduct
+    public :: getBondLength, getBondLengthSquared
     public :: getAngle, getDihedral
 
     double precision, parameter :: pi = dacos(-1.0d0)
@@ -64,7 +65,19 @@ contains
             crossProduct(2) = v1(3) * v2(1) - v1(1) * v2(3)
             crossProduct(3) = v1(1) * v2(2) - v1(2) * v2(1)
         end function crossProduct   
-            
+ 
+        function getBondLength(a1,a2)
+            type(atom), intent(in)      :: a1, a2
+            double precision            :: getBondLength
+            getBondLength = norm(r12(a1,a2))
+        end function getBondLength
+
+        function getBondLengthSquared(a1,a2)
+            type(atom), intent(in)      :: a1, a2
+            double precision            :: getBondLengthSquared
+            getBondLengthSquared = sumSquares(r12(a1,a2))
+        end function getBondLengthSquared
+
         function getAngle(a1,a2,a3)
             ! Return angle of atoms 
             type(atom), intent(in)          :: a1, a2, a3
