@@ -4,9 +4,23 @@ module atom_class
     
     public ::  atom, createAtom
 
+    character(len=2), dimension(92) :: elements = [ &
+                      " H","He","Li","Be"," B"," C"," N"," O"," F","Ne", &
+                      "Na","Mg","Al","Si"," P"," S","Cl","Ar"," K","Ca", &
+                      "Sc","Ti"," V","Cr","Mn","Fe","Co","Ni","Cu","Zn", &
+                      "Ga","Ge","As","Se","Br","Kr","Rb","Sr"," Y","Zr", &
+                      "Nb","Mo","Tc","Ru","Rh","Pd","Ag","Cd","In","Sn", &
+                      "Sb","Te"," I","Xe","Cs","Ba","La","Ce","Pr","Nd", &
+                      "Pm","Sm","Eu","Gd","Tb","Dy","Ho","Er","Tm","Yb", &
+                      "Lu","Hf","Ta"," W","Re","Os","Ir","Pt","Au","Hg", &
+                      "Tl","Pb","Bi","Po","At","Rn","Fr","Ra","Ac","Th", &
+                      "Pa"," U"]
+ 
+
     type atom
         character(len=2)                :: element
-        double precision                :: x,y,z
+        integer                         :: aid
+        double precision                :: x, y, z
         double precision, dimension(3)  :: coords
         real                            :: mass, LJe, LJs, charge
         contains
@@ -19,13 +33,14 @@ module atom_class
             ! Return atom object of element e placed at x,y,z
             type(atom)                      :: createAtom
             character(len=*), intent(in)    :: e 
-            double precision, intent(in)    :: x,y,z
+            double precision, intent(in)    :: x, y, z
             real, intent(in), optional      :: LJe,LJs,charge,mass
             createAtom%element = e
             createAtom%x = x
             createAtom%y = y
             createAtom%z = z
             createAtom%coords = [x, y, z]
+            createAtom%aid = getAid(e)
             if(present(mass)) then
                 createAtom%mass = mass
             else 
@@ -119,6 +134,21 @@ module atom_class
                     getcharge=0.0
             end select
         end function getcharge
+ 
+        function getAid(e)
+            ! Atomic number
+            real             :: getAid
+            character(len=*) :: e
+            character(len=2) :: e2
+            integer          :: i
+            write(e2,'(A2)') e
+            do i=1,size(elements)
+                if(e2 == elements(i)) then
+                    getAid = i
+                    exit
+                endif
+            enddo
+        end function getAid
 
         subroutine printInfo(self)
             class(atom) :: self
