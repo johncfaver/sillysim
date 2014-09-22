@@ -55,12 +55,22 @@ module simulator_class
             else
                 createSimulator%potentialFunction = defaultPotentialFunction()
             endif
-            if(present(nsteps)) createSimulator%nsteps = nsteps
+            if(present(nsteps)) then
+                createSimulator%nsteps = nsteps
+            else
+                createSimulator%nsteps = 1
+            endif
             if(present(dt)) createSimulator%dt = dt
             if(present(nthreads)) createSimulator%nthreads = nthreads
             if(present(outputfile)) createSimulator%outputfile = outputfile
-            if(present(outputFrequency)) createSimulator%outputFrequency = outputFrequency
-            if(createSimulator%outputFrequency == 0) createSimulator%outputFrequency = nsteps 
+            if(present(outputFrequency)) then
+                createSimulator%outputFrequency = outputFrequency
+            else
+                createSimulator%outputFrequency = createSimulator%nsteps
+            endif
+            if(createSimulator%outputFrequency == 0) then
+                createSimulator%outputFrequency = createSimulator%nsteps
+            endif
 
             open(20, file=createSimulator%outputfile, status="REPLACE", iostat=ios)
             if(ios < 0) print *, 'Error opening output file: ', createSimulator%outputfile
@@ -270,7 +280,7 @@ module simulator_class
             !$OMP& NUM_THREADS(self%nthreads)
             do i=1,imol%natoms
                 do j=1,imol%natoms
-                    if (j==i) continue
+                    if (j==i) cycle
                     self%forces(i,:) = self%forces(i,:) + self%forceMatrix(i,j,:)
                 enddo
             enddo
