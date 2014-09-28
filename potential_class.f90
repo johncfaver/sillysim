@@ -8,7 +8,8 @@
 !
 ! Each potential term contains:
 !   energy:         a pointer to function for calculating the energy for the term
-!   gradient:       a pointer to function for calculating the 3D gradient of energy
+!   gradient:       a pointer to function for calculating the 3D derivative dE/dr
+!   gradient2:      a pointer to function for calculating the 3D 2nd derivative d2E/dr2
 !   inUse:          a boolean value for switching the term on or off
 !
 
@@ -78,22 +79,22 @@ module potential_class
 
     type, extends(genericPotentialTerm) :: twoBodyPotentialTerm
         procedure (twoBodyTerm), pointer, nopass    :: energy => null()
-        procedure (twoBodyTerm3d), pointer, nopass  :: gradient => null()
+        procedure (twoBodyTerm3d), pointer, nopass  :: gradient => null(), gradient2 => null()
     end type twoBodyPotentialTerm
 
     type, extends(genericPotentialTerm) :: bondPotentialTerm
         procedure (bondTerm), pointer, nopass       :: energy => null()
-        procedure (bondTerm3d), pointer, nopass     :: gradient => null()
+        procedure (bondTerm3d), pointer, nopass     :: gradient => null(), gradient2 => null()
     end type bondPotentialTerm
 
     type, extends(genericPotentialTerm) :: anglePotentialTerm
         procedure (angleTerm), pointer, nopass      :: energy => null()
-        procedure (angleTerm3d), pointer, nopass    :: gradient => null()
+        procedure (angleTerm3d), pointer, nopass    :: gradient => null(), gradient2 => null()
     end type anglePotentialTerm
 
     type, extends(genericPotentialTerm) :: dihedralPotentialTerm
         procedure (dihedralTerm), pointer, nopass   :: energy => null()
-        procedure (dihedralTerm3d), pointer, nopass :: gradient => null()
+        procedure (dihedralTerm3d), pointer, nopass :: gradient => null(), gradient2 => null()
     end type dihedralPotentialTerm
 
     type potential
@@ -113,10 +114,9 @@ module potential_class
             ! Returns a default potential function
             ! Add bond, angle, dihedral, LJ, Coulomb
             type(potential) :: defaultPotentialFunction
-            
             call defaultPotentialFunction%addTerm(1)
             call defaultPotentialFunction%addTerm(2)
-            !call defaultPotentialFunction%addTerm(3) 
+            call defaultPotentialFunction%addTerm(3) 
             call defaultPotentialFunction%addTerm(4)
             call defaultPotentialFunction%addTerm(5)
         end function defaultPotentialFunction
@@ -192,11 +192,13 @@ module potential_class
             if(term == 1)then
                 self%bond%energy => bondEnergy
                 self%bond%gradient => bondGradient3d
+                self%bond%gradient2 => bondGradient3d2
                 self%bond%inUse = .true.
                 self%bond%potentialType = 1
             elseif(term == 2) then
                 self%angle%energy => angleEnergy
                 self%angle%gradient => angleGradient3d
+                self%angle%gradient2 => angleGradient3d2
                 self%angle%inUse = .true.
                 self%angle%potentialType = 2
             elseif(term == 3) then
@@ -265,6 +267,13 @@ module potential_class
             bondGradient = b%k * (norm(r12(b%a1,b%a2))-b%r0)
         end function bondGradient
 
+        function bondGradient2(b)
+            ! d2u/dr2 = k
+            type(bond), intent(in)  :: b
+            double precision        :: bondGradient2
+            bondGradient2 = b%k 
+        end function bondGradient2
+
         function bondGradient3d(b,i)
             ! return gradient on atom i (a1 or a2) due to bond b
             type(bond), intent(in)         :: b
@@ -276,6 +285,17 @@ module potential_class
             endif
         end function bondGradient3d
   
+        function bondGradient3d2(b,i)
+            ! d2u/dr2 = k
+            type(bond), intent(in)         :: b
+            integer, intent(in)            :: i
+            double precision, dimension(3) :: bondGradient3d2
+            bondGradient3d2 = b%k * normalized(r12(b%a2,b%a1))
+            if(i == 2) then
+                bondGradient3d2 = -bondGradient3d2
+            endif
+        end function bondGradient3d2 
+
         function angleEnergy(a)
             ! U = k/2*[r-r0]^2
             type(angle), intent(in) :: a
@@ -284,11 +304,18 @@ module potential_class
         end function angleEnergy
       
         function angleGradient(a)
-            ! du = k*[r-r0]
+            ! du/dr = k*[r-r0]
             type(angle), intent(in) :: a
             double precision        :: angleGradient
             angleGradient = a%k * (getAngle(a%a1,a%a2,a%a3)-a%r0)
         end function angleGradient
+
+        function angleGradient2(a)
+            ! d2u/dr2 = k
+            type(angle), intent(in) :: a
+            double precision        :: angleGradient2
+            angleGradient2 = a%k 
+        end function angleGradient2
 
         function angleGradient3d(a,i)
             ! return gradient on atom i (a1, a2, or a3) due to angle a
@@ -314,30 +341,90 @@ module potential_class
             endif
         end function angleGradient3d
 
+        function angleGradient3d2(a,i)
+            type(angle), intent(in)        :: a
+            integer, intent(in)            :: i
+            double precision               :: magnitude, theta
+            double precision, dimension(3) :: angleGradient3d2
+            double precision, dimension(3) :: b1,b2,u23
+            theta = getAngle(a%a1,a%a2,a%a3)
+            magnitude = a%k
+            b1 = normalized(r12(a%a1,a%a2))
+            u23 = normalized(r12(a%a2,a%a3))
+            b2 = u23 - dotProduct(u23,b1)*b1
+            if(i == 1)then
+                angleGradient3d2 = magnitude*(-b2)
+            elseif(i == 2)then
+                angleGradient3d2 = magnitude*(-dsin(theta)*b1+(b2-dcos(theta)*b2))
+            elseif(i == 3)then      
+                angleGradient3d2 = magnitude*(dsin(theta)*b1+dcos(theta)*b2)
+            endif
+        end function angleGradient3d2
+
         function dihedralEnergy(d)
             ! U = h/2 * [ 1 + cos(t*f-p) ]
             type(dihedral), intent(in)  :: d
             double precision            :: dihedralEnergy
-            dihedralEnergy = d%height/2.0d0*(1.0d0+dcos(getDihedral(d%a1,d%a2,d%a3,d%a4)*d%frequency - d%phase))
+            dihedralEnergy = d%height*0.5d0*(1.0d0+dcos(getDihedral(d%a1,d%a2,d%a3,d%a4)*d%frequency - d%phase))
         end function dihedralEnergy
       
         function dihedralGradient(d)
-            ! dU/dx = h/2 * [ -sin(t*f-p)*f]
+            ! dU/dx = h/2 * [ -sin(t*f-p)*f ]
             type(dihedral), intent(in)  :: d
             double precision            :: dihedralGradient
-            dihedralGradient = d%height/2.0d0*(-dsin(getDihedral(d%a1,d%a2,d%a3,d%a4)*d%frequency - d%phase)*d%frequency)
+            dihedralGradient = d%height*0.5d0*(-dsin(getDihedral(d%a1,d%a2,d%a3,d%a4)*d%frequency - d%phase)*d%frequency)
         end function dihedralGradient
 
-!INCOMPLETE 
         function dihedralGradient3d(d,i)
             ! return gradient on atom i (a1, a2, a3, or a4) due to dihedral d
             type(dihedral), intent(in)      :: d
             integer, intent(in)             :: i
-            double precision, dimension(3)  :: dihedralGradient3d, n1
-            double precision                :: magnitude
-            magnitude = dihedralGradient(d)
-            n1 = normalized(crossProduct(r12(d%a1,d%a2),r12(d%a1,d%a3)))
-            dihedralGradient3d = 0.0d0
+            double precision, dimension(3)  :: dihedralGradient3d,n1,n2,u12,u23,u34
+            double precision                :: l12, l23, l34, a123, a234
+            double precision, dimension(3)  :: a,b, f1, f2, f3, f4
+            double precision                :: rs2j,rs2k, rrcj, rrck
+
+            l12 = norm(r12(d%a1,d%a2))
+            l23 = norm(r12(d%a2,d%a3))
+            l34 = norm(r12(d%a3,d%a4))
+            
+            u12 = normalized(r12(d%a1,d%a2))
+            u23 = normalized(r12(d%a2,d%a3))
+            u34 = normalized(r12(d%a3,d%a4))
+
+            a123 = getAngle(d%a1,d%a2,d%a3)
+            a234 = getAngle(d%a2,d%a3,d%a4)
+            
+            rs2j = 1.0d0/(l12*dsin(a123)**2)
+            rs2k = 1.0d0/(l34*dsin(a234)**2)
+            rrcj = -l12/l23*dcos(a123)
+            rrck = -l34/l23*dcos(a234)
+
+            a = crossProduct(u12,u23)
+            b = crossProduct(u23,u34)
+           
+            f1 = a * (-rs2j)
+            f4 = b * rs2k
+            
+            a = f1 * (rrcj-1.0d0)
+            b = f4 * rrck
+            
+            f2 = a - b
+
+            f4 = -(f1+f2+f3)
+
+            select case(i)
+                case(1)
+                    dihedralGradient3d = f1
+                case(2)
+                    dihedralGradient3d = f2
+                case(3)
+                    dihedralGradient3d = f3
+                case(4)
+                    dihedralGradient3d = f4
+                case default
+                    print *, 'ERROR IN DIHEDRAL GRADIENT'
+            end select
         end function dihedralGradient3d
 
         function lennardJones(a1,a2)
