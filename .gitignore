@@ -1,5 +1,6 @@
 *.mod
 *.pdb
+*.xyz
 *.exe
 *.log
 *.o
