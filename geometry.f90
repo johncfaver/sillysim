@@ -79,7 +79,7 @@ contains
         end function getBondLengthSquared
 
         function getAngle(a1,a2,a3)
-            ! Return angle of atoms 
+            ! Return angle of atoms in radians
             type(atom), intent(in)          :: a1, a2, a3
             double precision                :: getAngle, icos, isin
             double precision, dimension(3)  :: v21, v23 
@@ -92,7 +92,7 @@ contains
         end function getAngle
         
         function getDihedral(a1,a2,a3,a4)
-            ! Return dihedral angle of atoms
+            ! Return dihedral angle of atoms in radians
             type(atom), intent(in)          :: a1, a2, a3, a4
             double precision                :: getDihedral
             double precision, dimension(3)  :: n1, n2 
