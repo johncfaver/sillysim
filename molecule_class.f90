@@ -192,7 +192,7 @@ module molecule_class
             logical, dimension(:,:), allocatable :: bondMatrix
             logical, intent(in), optional        :: guessBonds, guessAngles, guessDihedrals
             logical                              :: guessBonds_, guessAngles_, guessDihedrals_
-            integer, dimension(10)               :: tbonds
+            integer, dimension(:), allocatable   :: tbonds
             double precision                     :: td
 
             guessBonds_     = .false.
@@ -248,6 +248,7 @@ module molecule_class
             enddo 
 
             if(guessAngles_) then 
+                allocate(tbonds(10))
                 do i=1,self%natoms
                     tbonds = 0 
                     nbound = 0
@@ -258,24 +259,50 @@ module molecule_class
                             tbonds(nbound) = j
                         endif 
                     enddo
-                    if(nbound==4)then !sp3-like
-                        call self%createAngle(tbonds(1),i,tbonds(2),r0=109.5d0)
-                        call self%createAngle(tbonds(1),i,tbonds(3),r0=109.5d0)
-                        call self%createAngle(tbonds(1),i,tbonds(4),r0=109.5d0)
-                        call self%createAngle(tbonds(2),i,tbonds(3),r0=109.5d0)
-                        call self%createAngle(tbonds(2),i,tbonds(4),r0=109.5d0)
-                        call self%createAngle(tbonds(3),i,tbonds(4),r0=109.5d0)
-                    elseif(nbound==3)then !sp2-like
-                        call self%createAngle(tbonds(1),i,tbonds(2),r0=120.0d0)
-                        call self%createAngle(tbonds(1),i,tbonds(3),r0=120.0d0)
-                        call self%createAngle(tbonds(2),i,tbonds(3),r0=120.0d0)
-                    elseif(nbound==2)then !sp-like
-                        call self%createAngle(tbonds(1),i,tbonds(2),r0=180.0d0)
-                    endif
+                    if(self%atoms(i)%aid == 6)then
+                        if(nbound==4)then !sp3-like
+                            call self%createAngle(tbonds(1),i,tbonds(2),r0=109.5d0)
+                            call self%createAngle(tbonds(1),i,tbonds(3),r0=109.5d0)
+                            call self%createAngle(tbonds(1),i,tbonds(4),r0=109.5d0)
+                            call self%createAngle(tbonds(2),i,tbonds(3),r0=109.5d0)
+                            call self%createAngle(tbonds(2),i,tbonds(4),r0=109.5d0)
+                            call self%createAngle(tbonds(3),i,tbonds(4),r0=109.5d0)
+                        elseif(nbound==3)then !sp2-like
+                            call self%createAngle(tbonds(1),i,tbonds(2),r0=120.0d0)
+                            call self%createAngle(tbonds(1),i,tbonds(3),r0=120.0d0)
+                            call self%createAngle(tbonds(2),i,tbonds(3),r0=120.0d0)
+                        elseif(nbound==2)then !sp-like
+                            call self%createAngle(tbonds(1),i,tbonds(2),r0=180.0d0)
+                        endif
+                    elseif(self%atoms(i)%aid == 7) then
+                        if(nbound==4)then 
+                            call self%createAngle(tbonds(1),i,tbonds(2),r0=109.5d0)
+                            call self%createAngle(tbonds(1),i,tbonds(3),r0=109.5d0)
+                            call self%createAngle(tbonds(1),i,tbonds(4),r0=109.5d0)
+                            call self%createAngle(tbonds(2),i,tbonds(3),r0=109.5d0)
+                            call self%createAngle(tbonds(2),i,tbonds(4),r0=109.5d0)
+                            call self%createAngle(tbonds(3),i,tbonds(4),r0=109.5d0)
+                        elseif(nbound==3)then 
+                            call self%createAngle(tbonds(1),i,tbonds(2),r0=120.0d0)
+                            call self%createAngle(tbonds(1),i,tbonds(3),r0=120.0d0)
+                            call self%createAngle(tbonds(2),i,tbonds(3),r0=120.0d0)
+                        elseif(nbound==2)then 
+                            call self%createAngle(tbonds(1),i,tbonds(2),r0=120.0d0)
+                        endif
+                    elseif(self%atoms(i)%aid == 8) then
+                        if(nbound==2)then 
+                            call self%createAngle(tbonds(1),i,tbonds(2),r0=120.0d0)
+                        endif
+                    else
+                        if(nbound==2)then 
+                            call self%createAngle(tbonds(1),i,tbonds(2),r0=120.0d0)
+                        endif
+                    endif    
                 enddo
             endif
 
-            deallocate(bondMatrix)
+            if(allocated(bondMatrix)) deallocate(bondMatrix)
+            if(allocated(tbonds)) deallocate(tbonds)
 
         end subroutine guessTopology
 
