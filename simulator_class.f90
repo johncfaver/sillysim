@@ -20,8 +20,11 @@ module simulator_class
         type(potential)             :: potentialFunction          
         character(len=80)           :: outputfile="out.pdb"
         integer                     :: nsteps=1, outputFrequency=0, nthreads=1
+        integer                     :: nbUpdateFrequency=1000
         real                        :: dt=0.01
+        double precision            :: nbcutoff = 15.0d0
         double precision, dimension(:,:), allocatable   :: forces, velocities, accelerations
+        logical, dimension(:,:), allocatable            :: nblist
         double precision, dimension(:,:,:), allocatable :: forceMatrix
         contains
             procedure :: simulate
@@ -32,12 +35,13 @@ module simulator_class
             procedure :: calculate_accelerations
             procedure :: update_velocities
             procedure :: update_positions
+            procedure :: update_nblist
     end type simulator 
 
     contains
         function createSimulator(simulatedMolecule, potentialFunction, &
                                  outputfile, nthreads, nsteps, &
-                                 outputFrequency, dt)
+                                 outputFrequency, nbcutoff, nbUpdateFrequency, dt)
             !Simulator constructor. 
             !Requires molecule object.
             !Other variables are optional.
@@ -45,7 +49,8 @@ module simulator_class
             type(molecule), target               :: simulatedMolecule
             type(potential), optional            :: potentialFunction
             character(len=*), optional           :: outputfile
-            integer, optional                    :: nsteps, outputFrequency, nthreads
+            integer, optional                    :: nsteps, outputFrequency, nthreads, nbUpdateFrequency
+            double precision, optional           :: nbcutoff
             real, optional                       :: dt
             integer                              :: ios
             
@@ -63,6 +68,9 @@ module simulator_class
             if(present(dt)) createSimulator%dt = dt
             if(present(nthreads)) createSimulator%nthreads = nthreads
             if(present(outputfile)) createSimulator%outputfile = outputfile
+            if(present(nbUpdateFrequency)) createSimulator%nbUpdateFrequency = nbUpdateFrequency
+            if(present(nbcutoff)) createSimulator%nbcutoff = nbcutoff
+
             if(present(outputFrequency)) then
                 createSimulator%outputFrequency = outputFrequency
             else
@@ -95,7 +103,9 @@ module simulator_class
             
             if(.not. allocated(self%forces)) allocate(self%forces(natoms,3))
             if(.not. allocated(self%forceMatrix)) allocate(self%forceMatrix(natoms,natoms,3))
-          
+            if(.not. allocated(self%nblist)) allocate(self%nblist(natoms,natoms))
+            self%nblist = .true. 
+
             if(present(threshold)) threshold_ = threshold
             le = 1.0d100 
             if(present(nsteps)) self%nsteps = nsteps
@@ -144,17 +154,26 @@ module simulator_class
             if(.not. allocated(self%velocities)) allocate(self%velocities(natoms,3))
             if(.not. allocated(self%accelerations)) allocate(self%accelerations(natoms,3))
             if(.not. allocated(self%forceMatrix)) allocate(self%forceMatrix(natoms,natoms,3))
-
+            if(.not. allocated(self%nblist)) allocate(self%nblist(natoms,natoms))
+            if(self%nbcutoff <= 0.0d0) self%nblist = .true.
             if(present(nsteps)) self%nsteps = nsteps
-            self%velocities = 0.0d0
             
+            self%velocities = 0.0d0
+
             print *, 'INITIAL POTENTIAL ENERGY = ',self%potential_energy()
 
             call cpu_time(t_start)
             do istep = 1,self%nsteps
+                if (self%nbcutoff>0.0d0 .and. (mod(istep,self%nbUpdateFrequency) == 0 .or. istep == 1)) then
+                    call self%update_nblist()
+                endif
+               
                 call self%calculate_forces()
+              
                 call self%calculate_accelerations()
+             
                 call self%update_velocities()
+            
                 call self%update_positions()
 
                 if (mod(istep,self%outputFrequency) == 0)then
@@ -262,15 +281,17 @@ module simulator_class
             do x=1,ncells
                 i = imol%natoms - nint(sqrt(2.0*(1+ncells-x)))
                 j = mod(x+i*(i+1)/2-1,imol%natoms)+1
-                do k=1,ipot%getMaxTwoBodyTerms()
-                    if(ipot%twoBodyTerms(k)%inUse)then
-                        f12 = -ipot%twoBodyTerms(k)%gradient(imol%atoms(i),imol%atoms(j))
-                        self%forceMatrix(i,j,:) = self%forceMatrix(i,j,:) + f12
-                        self%forceMatrix(j,i,:) = self%forceMatrix(j,i,:) - f12
-                    else
-                        exit
-                    endif
-                enddo
+                if(self%nblist(i,j))then
+                    do k=1,ipot%getMaxTwoBodyTerms()
+                        if(ipot%twoBodyTerms(k)%inUse)then
+                            f12 = -ipot%twoBodyTerms(k)%gradient(imol%atoms(i),imol%atoms(j))
+                            self%forceMatrix(i,j,:) = self%forceMatrix(i,j,:) + f12
+                            self%forceMatrix(j,i,:) = self%forceMatrix(j,i,:) - f12
+                        else
+                            exit
+                        endif
+                    enddo
+                endif
             enddo
             !$OMP END PARALLEL DO 
             
@@ -376,5 +397,31 @@ module simulator_class
             enddo
             !$OMP END PARALLEL DO
         end subroutine update_positions
+
+        subroutine update_nblist(self)
+            class(simulator)        :: self
+            double precision        :: tdist
+            integer                 :: i, j, k
+            logical                 :: skip
+            self%nblist = .false.
+            tdist = self%nbcutoff ** 2
+            do i = 1,self%simulatedMolecule%natoms
+                do j = i+1,self%simulatedMolecule%natoms
+                    skip = .false.
+                    do k=1,3
+                        if(dabs(self%simulatedMolecule%atoms(i)%coords(k) - &
+                                self%simulatedMolecule%atoms(j)%coords(k)) > self%nbcutoff)then
+                            skip = .true.
+                            exit
+                        endif
+                    enddo
+                    if(skip) cycle
+                    if(getBondLengthSquared(self%simulatedMolecule%atoms(i),self%simulatedMolecule%atoms(j)) < tdist)then
+                        self%nblist(i,j) = .true.
+                        self%nblist(j,i) = .true.
+                    endif
+                enddo
+            enddo
+        end subroutine update_nblist
 
 end module simulator_class
