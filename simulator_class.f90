@@ -399,9 +399,13 @@ module simulator_class
         end subroutine update_positions
 
         subroutine update_nblist(self)
+            !Update logical array of whether non-bonded terms should be calculated.
+            !Only terms for atom pairs within nbcutoff should be evaluated.
+            !Additionally, contributions from atoms which are in bonds, angles, or 
+            !dihedrals together should not be evaluated.
             class(simulator)        :: self
             double precision        :: tdist
-            integer                 :: i, j, k
+            integer                 :: i, j, k, l
             logical                 :: skip
             self%nblist = .false.
             tdist = self%nbcutoff ** 2
@@ -422,6 +426,51 @@ module simulator_class
                     endif
                 enddo
             enddo
+            !Remove bonded atom pairs!
+            !$OMP  PARALLEL DO SCHEDULE(STATIC) & 
+            !$OMP& DEFAULT(SHARED) PRIVATE(i,j,k) &
+            !$OMP& NUM_THREADS(self%nthreads)
+            do i=1,self%simulatedMolecule%nbonds
+                j = self%simulatedMolecule%bonds(i)%ids(1)    
+                k = self%simulatedMolecule%bonds(i)%ids(2)    
+                if(self%nblist(j,k))then
+                    !$OMP CRITICAL
+                    self%nblist(j,k) = .false.
+                    self%nblist(k,j) = .false.
+                    !$OMP END CRITICAL
+                endif
+            enddo
+            !$OMP END PARALLEL DO 
+            
+            !Remove atoms in angles!
+            !$OMP  PARALLEL DO SCHEDULE(STATIC) & 
+            !$OMP& DEFAULT(SHARED) PRIVATE(i,j,k,l) &
+            !$OMP& NUM_THREADS(self%nthreads)
+            do i=1,self%simulatedMolecule%nangles
+                j = self%simulatedMolecule%angles(i)%ids(1)    
+                k = self%simulatedMolecule%angles(i)%ids(2)    
+                l = self%simulatedMolecule%angles(i)%ids(3)    
+                if(self%nblist(j,k))then
+                    !$OMP CRITICAL
+                    self%nblist(j,k) = .false.
+                    self%nblist(k,j) = .false.
+                    !$OMP END CRITICAL
+                endif
+                if(self%nblist(j,l))then
+                    !$OMP CRITICAL
+                    self%nblist(j,l) = .false.
+                    self%nblist(l,j) = .false.
+                    !$OMP END CRITICAL
+                endif
+                if(self%nblist(k,l))then
+                    !$OMP CRITICAL
+                    self%nblist(k,l) = .false.
+                    self%nblist(l,k) = .false.
+                    !$OMP END CRITICAL
+                endif
+            enddo
+            !$OMP END PARALLEL DO 
+
         end subroutine update_nblist
 
 end module simulator_class
