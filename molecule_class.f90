@@ -1,19 +1,27 @@
-! A molecule contains an array of atoms.
-! Molecules also contain definitions of bonds, angles, and dihedrals.
+! A molecule class is a system that is being simulated.
+! Molecule objects contain an array of atoms.
+! Molecules also contain definitions of bonds, angles, and dihedrals,
+! which are stored in bond, angle, and dihedral types.
+!
 ! A connectivity definition (e.g. bond) contains
 !   a) pointers to the atoms involved (a1,a2,a3)
 !   b) parameters for each definition (e.g. bond constant: k)
-!   c) integer array ids which holds atom numbers in the molecule
+!   c) integer array ids which holds atom numbers in the molecule object
+!
+! Molecule objects can be created by using the createMolecule function
+! OR the createRandomMolecule function.
 
 module molecule_class
     use atom_class
     use geometry
 
     implicit none
-    private 
+    private
+
     public :: molecule, createmolecule, createRandomMolecule
     public :: bond, angle, dihedral
 
+    !Define bond/angle/dihedral types
     type bond
         type(atom), pointer   :: a1 => null()
         type(atom), pointer   :: a2 => null()
@@ -35,7 +43,8 @@ module molecule_class
         double precision      :: height=2.0d0, frequency=3.0d0, phase=1.047d0
         integer, dimension(4) :: ids
     end type dihedral
-
+    
+    !Define molecule type
     type molecule
         character(len=50)   :: molname
         integer             :: natoms=0
@@ -56,37 +65,40 @@ module molecule_class
 
     contains
         function createMolecule(molname,atoms)
-            ! Return a molecule object given a name and array of atoms.
+            ! Return a molecule object given a name and an array of atoms.
+            ! Allocate bond/angle/dihedral arrays, assuming that we will
+            ! have no more than n*4,n*6,n*4 of each.
             character(len=*), intent(in)     :: molname
             type(atom), dimension(:), target :: atoms
-            integer                          :: maxBonds, maxAngles, maxDihedrals, n
+            integer                          :: maxBonds, maxAngles, maxDihedrals
+            integer                          :: natoms
             type(molecule)                   :: createMolecule
 
-            n = size(atoms) 
+            natoms = size(atoms) 
             createMolecule%molname  = molname
-            createMolecule%natoms   = n
+            createMolecule%natoms   = natoms
             createMolecule%atoms    = atoms
-            maxBonds     = n*4
-            maxAngles    = n*6
-            maxdihedrals = n*4
-            allocate(createMolecule%bonds(maxBonds), &
-                     createMolecule%angles(maxAngles), &
-                     createMolecule%dihedrals(maxDihedrals))
+            maxBonds     = natoms*4
+            maxAngles    = natoms*6
+            maxdihedrals = natoms*4
+            allocate(createMolecule%bonds(maxBonds))
+            allocate(createMolecule%angles(maxAngles))
+            allocate(createMolecule%dihedrals(maxDihedrals))
         end function createMolecule
 
         function createRandomMolecule(molname,natoms,cubeSize)
             ! Return a randomly generated molecule given name, number of atoms, and box size.
             character(len=*), intent(in)                :: molname
             integer, optional                           :: natoms
-            integer                                     :: natoms_=25
-            real, optional                              :: cubeSize
-            real                                        :: cubeSize_=20.0
+            real,    optional                           :: cubeSize
+            integer                                     :: natoms_   = 25
+            real                                        :: cubeSize_ = 20.0
             integer                                     :: i, j            
             double precision, dimension(:), allocatable :: rands
-            type(atom), dimension(:), allocatable       :: atoms
+            type(atom),       dimension(:), allocatable :: atoms
             type(molecule)                              :: createRandomMolecule
 
-            !rands will hold random numbers for atomic coordinates
+            !rands array will hold random numbers for atomic coordinates
             !cubesize_ is a length of side of enclosing cube
             !rands(1:3) will be x,y,z which range from 0 to cubesize_/2
             !rands(4:6) will determine the sign of rands(1:3)
@@ -130,7 +142,7 @@ module molecule_class
             double precision, optional :: k, r0
             
             if(a < 0 .or. b < 0 .or. a > self%natoms .or. b > self%natoms)then
-                print *, 'Bad bond definition.'
+                print *, 'ERROR: Bad bond definition.'
                 stop
             endif
             self%nbonds = self%nbonds + 1
@@ -138,13 +150,14 @@ module molecule_class
             newbond%a2 => self%atoms(b)
             newbond%ids(1) = a
             newbond%ids(2) = b
-            if(present(k)) newbond%k = k
+            if(present(k))  newbond%k  = k
             if(present(r0)) newbond%r0 = r0
-            self%bonds(self%nbonds) = newbond
+            self%bonds(self%nbonds)    = newbond
         end subroutine createBond
  
         subroutine createAngle(self,a,b,c,k,r0)
             ! Assigns a new angle to this molecule.
+            ! Optional equilibrium angle r0 is in degrees.
             class(molecule), target    :: self
             type(angle)                :: newangle
             integer                    :: a, b, c
@@ -157,13 +170,14 @@ module molecule_class
             newangle%ids(1) = a
             newangle%ids(2) = b
             newangle%ids(3) = c
-            if(present(k)) newangle%k = k
+            if(present(k))  newangle%k  = k
             if(present(r0)) newangle%r0 = deg2rad(r0)
-            self%angles(self%nangles) = newangle
+            self%angles(self%nangles)   = newangle
         end subroutine createangle
   
         subroutine createdihedral(self,a,b,c,d,height,frequency,phase)
             ! Assigns a new dihedral to this molecule.
+            ! Phase is in degrees
             class(molecule), target    :: self
             type(dihedral)             :: newdihedral
             integer                    :: a, b, c, d
@@ -178,23 +192,24 @@ module molecule_class
             newdihedral%ids(2) = b
             newdihedral%ids(3) = c
             newdihedral%ids(4) = d
-            if(present(height)) newdihedral%height = height
+            if(present(height)) newdihedral%height       = height
             if(present(frequency)) newdihedral%frequency = frequency
-            if(present(phase)) newdihedral%phase = phase
-            self%dihedrals(self%ndihedrals) = newdihedral
+            if(present(phase)) newdihedral%phase         = deg2rad(phase)
+            self%dihedrals(self%ndihedrals)              = newdihedral
         end subroutine createdihedral
  
         subroutine guessTopology(self, guessBonds, guessAngles, guessDihedrals)
             !Try to automatically assign bonds/angles/dihedrals based on atomic coordinates.
             !This is very basic at the moment and will need to be improved.
             class(molecule)                      :: self
-            integer                              :: i, j, nbound, c
-            logical, dimension(:,:), allocatable :: bondMatrix
             logical, intent(in), optional        :: guessBonds, guessAngles, guessDihedrals
             logical                              :: guessBonds_, guessAngles_, guessDihedrals_
+            integer                              :: i, j, nbound
+            logical, dimension(:,:), allocatable :: bondMatrix
             integer, dimension(:), allocatable   :: tbonds
             double precision                     :: td
 
+            !Optional arguments: which types of connectivity should we try to guess?
             guessBonds_     = .false.
             guessAngles_    = .false.
             guessDihedrals_ = .false.
@@ -202,56 +217,64 @@ module molecule_class
             if(present(guessAngles))    guessAngles_    = guessAngles
             if(present(guessDihedrals)) guessDihedrals_ = guessDihedrals
 
-            allocate(bondMatrix(self%natoms,self%natoms))
+            !If a bond is detected between atoms i and j, bondMatrix(i,j) is set to .true.
+            if(.not. (allocated(bondMatrix))) allocate(bondMatrix(self%natoms,self%natoms))
             bondMatrix = .false.
 
+            !Attempt to detect covalent bonds in molecule based on distances and elements
             do i=1,self%natoms
                 do j=i+1,self%natoms
+                    
                     if(self%atoms(i)%aid == 1 .and. self%atoms(j)%aid == 1) cycle !Ignore H-H
                     
                     td = getBondLengthSquared(self%atoms(i),self%atoms(j))
-                    if(td > 4.25d0) cycle !Maximum cutoff for bonds
-
-                    if(self%atoms(i)%aid == 1 .or. self%atoms(j)%aid == 1)then       ! Bonds to H
-                        if(self%atoms(i)%aid >= 15 .or. self%atoms(j)%aid >= 15)then ! i.e. S-H
+                    if(td > 4.25d0) cycle !Maximum cutoff for all bonds
+   
+                    !bonds involving H 
+                    if(self%atoms(i)%aid == 1 .or. self%atoms(j)%aid == 1)then     
+                        !H and 2nd row, i.e. S-H
+                        if(self%atoms(i)%aid >= 15 .or. self%atoms(j)%aid >= 15)then 
                             if(td <= 2.0d0) then
-                                if(guessBonds_) call self%createBond(i,j,r0=1.9d0) 
                                 bondMatrix(i,j) = .true. 
                                 bondMatrix(j,i) = .true.
+                                if(guessBonds_) call self%createBond(i,j,r0=1.9d0) 
                             endif
-                        else
-                            if(td <= 1.6d0) then
-                                if(guessBonds_) call self%createBond(i,j,r0=1.1d0) ! i.e. C-H, O-H, N-H
+                        else !i.e. C-H, O-H, N-H
+                            if(td <= 1.6d0) then                                             
                                 bondMatrix(i,j) = .true. 
                                 bondMatrix(j,i) = .true. 
+                                if(guessBonds_) call self%createBond(i,j,r0=1.1d0)
                             endif
                         endif
-
-                    elseif(self%atoms(i)%aid == 8 .or. self%atoms(j)%aid == 8)then ! i.e. C-O, N-O
+                    !bonds involving O
+                    elseif(self%atoms(i)%aid == 8 .or. self%atoms(j)%aid == 8)then 
                         if(td <= 2.6d0) then
+                            bondMatrix(i,j) = .true.
+                            bondMatrix(j,i) = .true.
                             if(guessBonds_) call self%createBond(i,j,r0=1.4d0)
-                            bondMatrix(i,j) = .true.
-                            bondMatrix(j,i) = .true.
                         endif
-                    elseif(self%atoms(i)%aid >= 15 .or. self%atoms(j)%aid >= 15)then ! i.e. C-S, C-P
+                    !bonds involving 2nd row
+                    elseif(self%atoms(i)%aid >= 15 .or. self%atoms(j)%aid >= 15)then 
                         if(td <= 4.0d0) then
-                            if(guessBonds_) call self%createBond(i,j,r0=1.9d0)
                             bondMatrix(i,j) = .true.
                             bondMatrix(j,i) = .true.
+                            if(guessBonds_) call self%createBond(i,j,r0=1.9d0)
                         endif
-                    elseif(td <= 3.25d0) then ! i.e. C-C, C-N
-                        if(guessBonds_) call self%createBond(i,j,r0=1.4d0)
+                    !Everything else, including C-C, C-N bonds
+                    elseif(td <= 3.25d0) then 
                         bondMatrix(i,j) = .true. 
                         bondMatrix(j,i) = .true.
+                        if(guessBonds_) call self%createBond(i,j,r0=1.4d0)
                     endif
                 enddo
             enddo 
 
+            !Attempt to define angles based on connectivity in bondMatrix array
             if(guessAngles_) then 
                 allocate(tbonds(10))
                 do i=1,self%natoms
-                    tbonds = 0 
-                    nbound = 0
+                    tbonds = 0 ! array of atom numbers of atoms in bonds with atom i
+                    nbound = 0 ! Number of bonds involving atom i
                     do j=1,self%natoms
                         if(i==j) cycle
                         if(bondMatrix(i,j))then
@@ -259,46 +282,57 @@ module molecule_class
                             tbonds(nbound) = j
                         endif 
                     enddo
+                    ! For C
                     if(self%atoms(i)%aid == 6)then
-                        if(nbound==4)then !sp3-like
+                        if(nbound==4)then !sp3-like, tetrahedral
                             call self%createAngle(tbonds(1),i,tbonds(2),r0=109.5d0)
                             call self%createAngle(tbonds(1),i,tbonds(3),r0=109.5d0)
                             call self%createAngle(tbonds(1),i,tbonds(4),r0=109.5d0)
                             call self%createAngle(tbonds(2),i,tbonds(3),r0=109.5d0)
                             call self%createAngle(tbonds(2),i,tbonds(4),r0=109.5d0)
                             call self%createAngle(tbonds(3),i,tbonds(4),r0=109.5d0)
-                        elseif(nbound==3)then !sp2-like
+                        elseif(nbound==3)then !sp2-like, trigonal planar
                             call self%createAngle(tbonds(1),i,tbonds(2),r0=120.0d0)
                             call self%createAngle(tbonds(1),i,tbonds(3),r0=120.0d0)
                             call self%createAngle(tbonds(2),i,tbonds(3),r0=120.0d0)
-                        elseif(nbound==2)then !sp-like
+                        elseif(nbound==2)then !sp-like, linear
                             call self%createAngle(tbonds(1),i,tbonds(2),r0=180.0d0)
                         endif
+                    ! For N
                     elseif(self%atoms(i)%aid == 7) then
-                        if(nbound==4)then 
+                        if(nbound==4)then ! Ammonium-like
                             call self%createAngle(tbonds(1),i,tbonds(2),r0=109.5d0)
                             call self%createAngle(tbonds(1),i,tbonds(3),r0=109.5d0)
                             call self%createAngle(tbonds(1),i,tbonds(4),r0=109.5d0)
                             call self%createAngle(tbonds(2),i,tbonds(3),r0=109.5d0)
                             call self%createAngle(tbonds(2),i,tbonds(4),r0=109.5d0)
                             call self%createAngle(tbonds(3),i,tbonds(4),r0=109.5d0)
-                        elseif(nbound==3)then 
-                            call self%createAngle(tbonds(1),i,tbonds(2),r0=120.0d0)
-                            call self%createAngle(tbonds(1),i,tbonds(3),r0=120.0d0)
-                            call self%createAngle(tbonds(2),i,tbonds(3),r0=120.0d0)
-                        elseif(nbound==2)then 
+                        elseif(nbound==3)then ! Ammonia-like
+                            call self%createAngle(tbonds(1),i,tbonds(2),r0=107.8d0)
+                            call self%createAngle(tbonds(1),i,tbonds(3),r0=107.8d0)
+                            call self%createAngle(tbonds(2),i,tbonds(3),r0=107.8d0)
+                        elseif(nbound==2)then ! sp2-like
                             call self%createAngle(tbonds(1),i,tbonds(2),r0=120.0d0)
                         endif
+                    ! For O
                     elseif(self%atoms(i)%aid == 8) then
-                        if(nbound==2)then 
-                            call self%createAngle(tbonds(1),i,tbonds(2),r0=120.0d0)
+                        if(nbound==2)then ! Ether-like
+                            call self%createAngle(tbonds(1),i,tbonds(2),r0=110.0d0)
                         endif
-                    else
+                    ! For S
+                    elseif(self%atoms(i)%aid == 16) then
                         if(nbound==2)then 
-                            call self%createAngle(tbonds(1),i,tbonds(2),r0=120.0d0)
+                            call self%createAngle(tbonds(1),i,tbonds(2),r0=108.0d0)
                         endif
-                    endif    
+                    endif   
+
                 enddo
+            endif
+    
+            !Attempt to detect and define dihedrals
+            if(guessDihedrals_)then
+                !Incomplete!
+                print *, 'WARNING: dihedral guessing incomplete.'
             endif
 
             if(allocated(bondMatrix)) deallocate(bondMatrix)
@@ -311,7 +345,6 @@ module molecule_class
             class(molecule)                         :: self
             double precision, dimension(3)          :: tpoint
             integer                                 :: i
-            
             open(22,file="topmap.xyz",action="WRITE",status="REPLACE")
             write(22,*) "TOPMAP"
             write(22,*) self%nbonds
@@ -324,6 +357,7 @@ module molecule_class
 
         subroutine printInfo(self)
             ! Prints information about this molecule.
+            ! Print name, natoms, atom info, bond/angle/dihedral info
             class(molecule) :: self
             integer         :: i
 
@@ -364,7 +398,7 @@ module molecule_class
         end subroutine printInfo
 
         function centerOfMolecule(self)
-            ! Return center of molcule as vector
+            ! Return geometric center of molcule as vector
             class(molecule)                 :: self
             double precision, dimension(3)  :: centerOfMolecule 
             integer                         :: i
