@@ -61,6 +61,7 @@ module molecule_class
             procedure :: printTopMap
             procedure :: printInfo
             procedure :: centerOfMolecule
+            procedure :: atomsConnected
     end type molecule
 
     contains
@@ -210,9 +211,9 @@ module molecule_class
             double precision                     :: td
 
             !Optional arguments: which types of connectivity should we try to guess?
-            guessBonds_     = .false.
-            guessAngles_    = .false.
-            guessDihedrals_ = .false.
+            guessBonds_     = .true.
+            guessAngles_    = .true.
+            guessDihedrals_ = .true.
             if(present(guessBonds))     guessBonds_     = guessBonds
             if(present(guessAngles))    guessAngles_    = guessAngles
             if(present(guessDihedrals)) guessDihedrals_ = guessDihedrals
@@ -409,5 +410,37 @@ module molecule_class
             enddo  
             centerOfMolecule = centerOfMolecule / self%natoms
         end function centerOfMolecule
+
+        function atomsConnected(self, a1, a2)
+            ! Return true if atom numbers a1 and a2 are involved
+            ! in a bond, angle, or dihedral
+            class(molecule)             :: self
+            integer                     :: i, a1, a2
+            logical                     :: atomsConnected
+            
+            atomsConnected = .false.
+
+            do i=1,self%nbonds
+                if (any(self%bonds(i)%ids == a1) .and. any(self%bonds(i)%ids == a2)) then
+                    atomsConnected = .true.
+                    return 
+                endif
+            enddo 
+            do i=1,self%nangles
+                if (any(self%angles(i)%ids == a1) .and. any(self%angles(i)%ids == a2))then
+                    atomsConnected = .true.
+                    return 
+                endif
+            enddo
+            do i=1,self%ndihedrals
+                if (any(self%dihedrals(i)%ids == a1) .and. any(self%dihedrals(i)%ids == a2))then
+                    atomsConnected = .true.
+                    return 
+                endif
+            enddo
+        end function atomsConnected
+
+
+
 
     end module molecule_class

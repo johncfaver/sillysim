@@ -15,6 +15,10 @@ module simulator_class
 
     public :: simulator, createSimulator
     
+    type nbpair
+        integer, dimension(2)   :: ids 
+    end type nbpair
+
     type simulator
         type(molecule), pointer     :: simulatedMolecule => null()
         type(potential)             :: potentialFunction          
@@ -22,9 +26,9 @@ module simulator_class
         integer                     :: nsteps=1, outputFrequency=0, nthreads=1
         integer                     :: nbUpdateFrequency=1000
         real                        :: dt=0.01
-        double precision            :: nbcutoff = 15.0d0
+        double precision            :: nbcutoff = 10.0d0
         double precision, dimension(:,:), allocatable   :: forces, velocities, accelerations
-        logical, dimension(:,:), allocatable            :: nblist
+        type(nbpair), dimension(:), allocatable         :: nblist
         double precision, dimension(:,:,:), allocatable :: forceMatrix
         contains
             procedure :: simulate
@@ -103,17 +107,21 @@ module simulator_class
             
             if(.not. allocated(self%forces)) allocate(self%forces(natoms,3))
             if(.not. allocated(self%forceMatrix)) allocate(self%forceMatrix(natoms,natoms,3))
-            if(.not. allocated(self%nblist)) allocate(self%nblist(natoms,natoms))
-            self%nblist = .true. 
-
+            if(.not. allocated(self%nblist) .and. self%nbcutoff > 0.0d0) allocate(self%nblist(natoms*250))
+                
             if(present(threshold)) threshold_ = threshold
             le = 1.0d100 
             if(present(nsteps)) self%nsteps = nsteps
+            
+            if(self%nbcutoff > 0.0d0) call self%update_nblist()
 
             print *, 'INITIAL POTENTIAL ENERGY = ',self%potential_energy()
             call writeMolecule(self%outputfile, self%simulatedMolecule)
             call cpu_time(t_start)
             do istep = 1, self%nsteps
+                if(self%nbcutoff > 0.0d0 .and. mod(istep,self%nbUpdateFrequency) == 0) then
+                    call self%update_nblist()
+                endif
                 call self%calculate_forces()
                 !$OMP  PARALLEL DO SCHEDULE(STATIC) &
                 !$OMP& DEFAULT(SHARED) PRIVATE(i,ivec) &
@@ -154,17 +162,18 @@ module simulator_class
             if(.not. allocated(self%velocities)) allocate(self%velocities(natoms,3))
             if(.not. allocated(self%accelerations)) allocate(self%accelerations(natoms,3))
             if(.not. allocated(self%forceMatrix)) allocate(self%forceMatrix(natoms,natoms,3))
-            if(.not. allocated(self%nblist)) allocate(self%nblist(natoms,natoms))
-            if(self%nbcutoff <= 0.0d0) self%nblist = .true.
+            if(.not. allocated(self%nblist) .and. self%nbcutoff > 0.0d0) allocate(self%nblist(natoms*250))
             if(present(nsteps)) self%nsteps = nsteps
             
             self%velocities = 0.0d0
 
+            if(self%nbcutoff > 0.0d0) call self%update_nblist()
+            
             print *, 'INITIAL POTENTIAL ENERGY = ',self%potential_energy()
 
             call cpu_time(t_start)
             do istep = 1,self%nsteps
-                if (self%nbcutoff>0.0d0 .and. (mod(istep,self%nbUpdateFrequency) == 0 .or. istep == 1)) then
+                if (self%nbcutoff>0.0d0 .and. (mod(istep,self%nbUpdateFrequency) == 0)) then
                     call self%update_nblist()
                 endif
                
@@ -200,26 +209,47 @@ module simulator_class
 
             imol => self%simulatedMolecule
             ipot => self%potentialFunction
-            ncells = (imol%natoms**2 - imol%natoms)*0.5
             nterms = ipot%getMaxTwoBodyTerms()
             potential_energy = 0.0d0
 
-            !$OMP  PARALLEL DO SCHEDULE(STATIC) &
-            !$OMP& DEFAULT(SHARED) PRIVATE(x,i,j,k) &
-            !$OMP& NUM_THREADS(self%nthreads) REDUCTION(+:potential_energy)
-            do x=1,ncells
-                i = imol%natoms - nint(sqrt(2.0*(1+ncells-x)))
-                j = mod(x+i*(i+1)/2-1,imol%natoms)+1
-                do k=1,nterms
-                    if(ipot%twoBodyTerms(k)%inUse)then
-                        potential_energy = potential_energy + &
-                            ipot%twoBodyTerms(k)%energy(imol%atoms(i),imol%atoms(j))
-                    else
-                        exit
+            if(self%nbcutoff <= 0.0d0) then
+                ncells = (imol%natoms**2 - imol%natoms)*0.5
+                !$OMP  PARALLEL DO SCHEDULE(STATIC) &
+                !$OMP& DEFAULT(SHARED) PRIVATE(x,i,j,k) &
+                !$OMP& NUM_THREADS(self%nthreads) REDUCTION(+:potential_energy)
+                do x=1,ncells
+                    i = imol%natoms - nint(sqrt(2.0*(1+ncells-x)))
+                    j = mod(x+i*(i+1)/2-1,imol%natoms)+1
+                    do k=1,nterms
+                        if(ipot%twoBodyTerms(k)%inUse)then
+                            potential_energy = potential_energy + &
+                                ipot%twoBodyTerms(k)%energy(imol%atoms(i),imol%atoms(j))
+                        else
+                            exit
+                        endif
+                    enddo
+                enddo
+               !$OMP END PARALLEL DO
+            else
+                !$OMP  PARALLEL DO SCHEDULE(STATIC) &
+                !$OMP& DEFAULT(SHARED) PRIVATE(x,i,j,k) &
+                !$OMP& NUM_THREADS(self%nthreads) REDUCTION(+:potential_energy)
+                do x=1,size(self%nblist)
+                    if(self%nblist(x)%ids(1) > 0)then
+                        i = self%nblist(x)%ids(1)
+                        j = self%nblist(x)%ids(2)
+                        do k=1,nterms
+                            if(ipot%twoBodyTerms(k)%inUse)then
+                                potential_energy = potential_energy + &
+                                    ipot%twoBodyTerms(k)%energy(imol%atoms(i),imol%atoms(j))
+                            else
+                                exit
+                            endif
+                        enddo
                     endif
                 enddo
-            enddo
-           !$OMP END PARALLEL DO
+               !$OMP END PARALLEL DO
+            endif
             if(ipot%bond%inUse)then
                 do i=1,imol%nbonds
                     potential_energy = potential_energy + &
@@ -268,34 +298,55 @@ module simulator_class
             ipot => self%potentialFunction
 
             !FIRST ADD TWO BODY TERMS
-            ncells = (imol%natoms**2 - imol%natoms)*0.5
             self%forces = 0.0d0
             self%forceMatrix = 0.0d0
-            !uses https://stackoverflow.com/a/8135316 to vectorize F elements
-            ! Force matrix F (Fij is force on atom i due to atom j)
-            ! The total force on atom i is the sum over j
-            !
-            !$OMP  PARALLEL DO SCHEDULE(STATIC) & 
-            !$OMP& DEFAULT(SHARED) PRIVATE(x,i,j,k,f12) &
-            !$OMP& NUM_THREADS(self%nthreads)
-            do x=1,ncells
-                i = imol%natoms - nint(sqrt(2.0*(1+ncells-x)))
-                j = mod(x+i*(i+1)/2-1,imol%natoms)+1
-                if(self%nblist(i,j))then
-                    do k=1,ipot%getMaxTwoBodyTerms()
-                        if(ipot%twoBodyTerms(k)%inUse)then
-                            f12 = -ipot%twoBodyTerms(k)%gradient(imol%atoms(i),imol%atoms(j))
-                            self%forceMatrix(i,j,:) = self%forceMatrix(i,j,:) + f12
-                            self%forceMatrix(j,i,:) = self%forceMatrix(j,i,:) - f12
-                        else
-                            exit
-                        endif
-                    enddo
-                endif
-            enddo
-            !$OMP END PARALLEL DO 
             
-            !NOW COMBINE TWO BODY TERMS
+            if(self%nbcutoff <= 0.0d0) then
+                ncells = (imol%natoms**2 - imol%natoms)*0.5
+                !uses https://stackoverflow.com/a/8135316 to vectorize F elements
+                ! Force matrix F (Fij is force on atom i due to atom j)
+                ! The total force on atom i is the sum over j
+                !
+                !$OMP  PARALLEL DO SCHEDULE(STATIC) & 
+                !$OMP& DEFAULT(SHARED) PRIVATE(x,i,j,k,f12) &
+                !$OMP& NUM_THREADS(self%nthreads)
+                do x=1,ncells
+                    i = imol%natoms - nint(sqrt(2.0*(1+ncells-x)))
+                    j = mod(x+i*(i+1)/2-1,imol%natoms)+1
+                        do k=1,ipot%getMaxTwoBodyTerms()
+                            if(ipot%twoBodyTerms(k)%inUse)then
+                                f12 = -ipot%twoBodyTerms(k)%gradient(imol%atoms(i),imol%atoms(j))
+                                self%forceMatrix(i,j,:) = self%forceMatrix(i,j,:) + f12
+                                self%forceMatrix(j,i,:) = self%forceMatrix(j,i,:) - f12
+                            else
+                                exit
+                            endif
+                        enddo
+                enddo
+                !$OMP END PARALLEL DO 
+            else
+                !$OMP  PARALLEL DO SCHEDULE(STATIC) & 
+                !$OMP& DEFAULT(SHARED) PRIVATE(x,i,j,k,f12) &
+                !$OMP& NUM_THREADS(self%nthreads)
+                do x=1,size(self%nblist)
+                    if(self%nblist(x)%ids(1) > 0)then
+                        i = self%nblist(x)%ids(1) 
+                        j = self%nblist(x)%ids(2) 
+                        do k=1,ipot%getMaxTwoBodyTerms()
+                            if(ipot%twoBodyTerms(k)%inUse)then
+                                f12 = -ipot%twoBodyTerms(k)%gradient(imol%atoms(i),imol%atoms(j))
+                                self%forceMatrix(i,j,:) = self%forceMatrix(i,j,:) + f12
+                                self%forceMatrix(j,i,:) = self%forceMatrix(j,i,:) - f12
+                            else
+                                exit
+                            endif
+                        enddo
+                    endif
+                enddo
+                !$OMP END PARALLEL DO 
+            endif 
+
+            !!NOW COMBINE TWO BODY TERMS
             !$OMP  PARALLEL DO SCHEDULE(STATIC) &
             !$OMP& DEFAULT(SHARED) PRIVATE(i,j) &
             !$OMP& NUM_THREADS(self%nthreads)
@@ -399,78 +450,41 @@ module simulator_class
         end subroutine update_positions
 
         subroutine update_nblist(self)
-            !Update logical array of whether non-bonded terms should be calculated.
+            !Update list of atoms for which non-bonded terms should be calculated.
             !Only terms for atom pairs within nbcutoff should be evaluated.
-            !Additionally, contributions from atoms which are in bonds, angles, or 
-            !dihedrals together should not be evaluated.
-            class(simulator)        :: self
-            double precision        :: tdist
-            integer                 :: i, j, k, l
-            logical                 :: skip
-            self%nblist = .false.
-            tdist = self%nbcutoff ** 2
-            do i = 1,self%simulatedMolecule%natoms
-                do j = i+1,self%simulatedMolecule%natoms
+            class(simulator), target    :: self
+            class(molecule), pointer    :: imol
+            double precision            :: tdist
+            integer                     :: i, j, k, nbcount
+            logical                     :: skip
+           
+            imol => self%simulatedMolecule
+
+            do i=1,size(self%nblist)
+                self%nblist(i)%ids = 0
+            enddo
+
+            tdist = self%nbcutoff ** 2.0
+            nbcount = 1
+            do i = 1,imol%natoms
+                do j = i+1,imol%natoms
                     skip = .false.
                     do k=1,3
-                        if(dabs(self%simulatedMolecule%atoms(i)%coords(k) - &
-                                self%simulatedMolecule%atoms(j)%coords(k)) > self%nbcutoff)then
+                        if(dabs(imol%atoms(i)%coords(k) - imol%atoms(j)%coords(k)) > self%nbcutoff)then
                             skip = .true.
                             exit
                         endif
                     enddo
                     if(skip) cycle
-                    if(getBondLengthSquared(self%simulatedMolecule%atoms(i),self%simulatedMolecule%atoms(j)) < tdist)then
-                        self%nblist(i,j) = .true.
-                        self%nblist(j,i) = .true.
+                    if(getBondLengthSquared(imol%atoms(i),imol%atoms(j)) <= tdist)then
+                        if(.not. imol%atomsConnected(i,j))then
+                            self%nblist(nbcount)%ids(1) = i
+                            self%nblist(nbcount)%ids(2) = j
+                            nbcount = nbcount + 1
+                        endif
                     endif
                 enddo
             enddo
-            !Remove bonded atom pairs!
-            !$OMP  PARALLEL DO SCHEDULE(STATIC) & 
-            !$OMP& DEFAULT(SHARED) PRIVATE(i,j,k) &
-            !$OMP& NUM_THREADS(self%nthreads)
-            do i=1,self%simulatedMolecule%nbonds
-                j = self%simulatedMolecule%bonds(i)%ids(1)    
-                k = self%simulatedMolecule%bonds(i)%ids(2)    
-                if(self%nblist(j,k))then
-                    !$OMP CRITICAL
-                    self%nblist(j,k) = .false.
-                    self%nblist(k,j) = .false.
-                    !$OMP END CRITICAL
-                endif
-            enddo
-            !$OMP END PARALLEL DO 
-            
-            !Remove atoms in angles!
-            !$OMP  PARALLEL DO SCHEDULE(STATIC) & 
-            !$OMP& DEFAULT(SHARED) PRIVATE(i,j,k,l) &
-            !$OMP& NUM_THREADS(self%nthreads)
-            do i=1,self%simulatedMolecule%nangles
-                j = self%simulatedMolecule%angles(i)%ids(1)    
-                k = self%simulatedMolecule%angles(i)%ids(2)    
-                l = self%simulatedMolecule%angles(i)%ids(3)    
-                if(self%nblist(j,k))then
-                    !$OMP CRITICAL
-                    self%nblist(j,k) = .false.
-                    self%nblist(k,j) = .false.
-                    !$OMP END CRITICAL
-                endif
-                if(self%nblist(j,l))then
-                    !$OMP CRITICAL
-                    self%nblist(j,l) = .false.
-                    self%nblist(l,j) = .false.
-                    !$OMP END CRITICAL
-                endif
-                if(self%nblist(k,l))then
-                    !$OMP CRITICAL
-                    self%nblist(k,l) = .false.
-                    self%nblist(l,k) = .false.
-                    !$OMP END CRITICAL
-                endif
-            enddo
-            !$OMP END PARALLEL DO 
-
         end subroutine update_nblist
-
-end module simulator_class
+        
+ end module simulator_class
