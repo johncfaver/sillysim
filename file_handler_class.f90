@@ -54,9 +54,11 @@ module file_handler_class
             character(len=2)                    :: element
             character                           :: chain
             integer                             :: atomNumber, resNumber
-            integer                             :: natoms=0, ios=1, iatom=0
+            integer                             :: natoms, ios, iatom
             double precision                    :: x, y, z, occ, beta
-
+            natoms = 0
+            ios = 1
+            iatom = 0
             open(21, file=filename, status="old", iostat=ios, action="READ")
             do
                 read(21,'(A80)',iostat=ios) templine
